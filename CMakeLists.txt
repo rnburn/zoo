@@ -13,84 +13,89 @@ function(_pch_make_include_flags _result)
   set(${_result} ${_include_flags} PARENT_SCOPE)
 endfunction()
 
-function(_pch_set_includes _target)
-  foreach(_dir ${ARGN})
-    target_include_directories(${_target} PUBLIC ${_dir})
-  endforeach()
+function(_pch_get_stub_source _result _header)
+  set(${_result} ${CMAKE_BINARY_DIR}/pch/${_header}_stub.cpp PARENT_SCOPE)
 endfunction()
 
-function(_pch_get_stub_basename _result _pch)
-  get_filename_component(_pch_directory ${_pch} DIRECTORY)
-  set(${_result} ${CMAKE_BINARY_DIR}/pch/${_pch}.stub PARENT_SCOPE)
-endfunction()
-
-function(_pch_get_directory _result _pch)
-  _pch_get_stub_basename(_pch_basename ${_pch})
-  get_filename_component(_directory ${_pch_basename} DIRECTORY)
+function(_pch_get_directory _result _header)
+  _pch_get_stub_source(_stub_source ${_header})
+  get_filename_component(_directory ${_stub_source} DIRECTORY)
   set(${_result} ${_directory} PARENT_SCOPE)
 endfunction()
 
-function(_pch_make_target _result _pch)
-  string(REPLACE "/" "_" _target "_pch_${_pch}")
+function(_pch_get_target _result _header)
+  string(REPLACE "/" "_" _target "_pch_${_header}")
   set(${_result} ${_target} PARENT_SCOPE)
 endfunction()
 
-function(_pch_get_full_path _result _pch)
+function(_pch_get_full_header_path _result _header)
   get_property(_includes DIRECTORY PROPERTY INCLUDE_DIRECTORIES)
-  find_path(_header_path ${_pch} ${_includes})
-  set(${_result} "${_header_path}/${_pch}" PARENT_SCOPE)
+  find_path(_header_path ${_header} ${_includes})
+  set(${_result} ${_header_path}/${_header} PARENT_SCOPE)
 endfunction()
 
-function(_pch_add_dependency_stub _pch)
-  _pch_get_stub_basename(_pch_basename ${_pch})
-  set(_stub_source ${_pch_basename}.cpp)
-  _pch_make_target(_stub_target ${_pch})
-  get_filename_component(_stub_directory ${_pch_basename} DIRECTORY)
+function(_pch_get_full_pch_path _result _header)
+  if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+    set(_suffix ".pch")
+  elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+    set(_suffix ".gch")
+  else()
+    error("${CMAKE_CXX_COMPILER_ID} is not supported")
+  endif()
+  _pch_get_directory(_directory ${_header})
+  set(${_result} ${_directory}/include/${_header}${_suffix} PARENT_SCOPE)
+endfunction()
+
+function(_pch_add_dependency_stub _header)
+  _pch_get_stub_source(_source ${_header})
+  _pch_get_target(_target ${_header})
+  _pch_get_directory(_directory ${_header})
   separate_arguments(_command UNIX_COMMAND
-    "mkdir -p ${_stub_directory} && \
-     printf \\\"#include <${_pch}>\\\\nint main() { return 0; }\\\" > ${_stub_source}")
-  add_custom_command(OUTPUT ${_stub_source} COMMAND ${_command})
-  add_executable(${_stub_target} EXCLUDE_FROM_ALL ${_stub_source})
+    "mkdir -p ${_directory} && \
+     printf \\\"#include <${_header}>\\\\nint main() { return 0; }\\\" 
+        > ${_source}")
+  add_custom_command(OUTPUT ${_source} COMMAND ${_command})
+  add_executable(${_target} EXCLUDE_FROM_ALL ${_source})
+  set_target_properties(${_target}
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${_directory})
 endfunction()
 
-function(add_precompiled_header _pch)
-  _pch_add_dependency_stub(${_pch})
-  _pch_get_directory(_directory ${_pch})
-  _pch_make_target(_target ${_pch})
+function(add_precompiled_header _header)
+  _pch_add_dependency_stub(${_header})
+  _pch_get_directory(_directory ${_header})
+  _pch_get_target(_target ${_header})
 
   get_property(_includes DIRECTORY PROPERTY INCLUDE_DIRECTORIES)
   _pch_make_include_flags(_include_flags ${_includes})
-  _pch_set_includes(${_target} ${_includes})
-  _pch_get_full_path(_full_pch ${_pch})
-  set(_output_pch ${_directory}/${_pch}.gch)
-  get_filename_component(_output_pch_directory ${_output_pch} DIRECTORY)
-  _pch_get_stub_basename(_stub_basename ${_pch})
-  set(_update_header_stub ${_stub_basename}.h)
+  target_include_directories(${_target} PUBLIC ${_includes})
+  _pch_get_full_header_path(_full_header_path ${_header})
+  _pch_get_full_pch_path(_pch ${_header})
   
   separate_arguments(_build_pch UNIX_COMMAND
-    "mkdir -p ${_output_pch_directory} && \
+    "mkdir -p `dirname ${_pch}` && \
      ${CMAKE_CXX_COMPILER} ${CMAKE_CXX_FLAGS} ${_include_flags} \
-     ${_full_pch} -o ${_output_pch}")
+     ${_full_header_path} -o ${_pch}")
   add_custom_command(TARGET ${_target} PRE_BUILD 
-    COMMAND ${_build_pch}
-    BYPRODUCTS ${_output_pch})
+    COMMAND ${_build_pch} BYPRODUCTS ${_pch})
 endfunction()
 
-function(use_precompiled_header _target _pch)
-  _pch_get_directory(_directory ${_pch})
-  set(_output_pch ${_directory}/${_pch}.gch)
+function(use_precompiled_header _target _header)
+  _pch_get_full_pch_path(_pch ${_header})
 
   get_property(_sources TARGET ${_target} PROPERTY SOURCES)
   set_source_files_properties(${_sources}
-    PROPERTIES OBJECT_DEPENDS ${_output_pch})
+    PROPERTIES OBJECT_DEPENDS ${_pch})
 
-  _pch_make_target(_pch_target ${_pch})
-  _pch_get_stub_basename(_pch_basename ${_pch})
+  _pch_get_target(_pch_target ${_header})
   add_dependencies(${_target} ${_pch_target})
 
-  _pch_get_directory(_pch_directory ${_pch})
-  target_include_directories(${_target} BEFORE
-    PUBLIC ${_pch_directory})
+  _pch_get_directory(_directory ${_header})
+  target_include_directories(${_target} BEFORE PUBLIC ${_directory}/include)
+
+  if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+    set_target_properties(${_target} 
+      PROPERTIES COMPILE_FLAGS "-include-pch ${_pch}")
+  endif()
 endfunction()
 
 include_directories(enclosure/include)
