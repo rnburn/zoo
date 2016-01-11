@@ -1,3 +1,4 @@
+#include <zoo/wolves/dependency.h>
 #include <zoo/wolves/display.h>
 
 int main() {

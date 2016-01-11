@@ -21,7 +21,7 @@ endfunction()
 
 function(_pch_get_stub_basename _result _pch)
   get_filename_component(_pch_directory ${_pch} DIRECTORY)
-  set(${_result} ${CMAKE_BINARY_DIR}/.pch/${_pch}.stub PARENT_SCOPE)
+  set(${_result} ${CMAKE_BINARY_DIR}/pch/${_pch}.stub PARENT_SCOPE)
 endfunction()
 
 function(_pch_get_directory _result _pch)
@@ -48,10 +48,9 @@ function(_pch_add_dependency_stub _pch)
   get_filename_component(_stub_directory ${_pch_basename} DIRECTORY)
   separate_arguments(_command UNIX_COMMAND
     "mkdir -p ${_stub_directory} && \
-     echo \\\"int main() { return 0; }\\\" > ${_stub_source}")
+     printf \\\"#include <${_pch}>\\\\nint main() { return 0; }\\\" > ${_stub_source}")
   add_custom_command(OUTPUT ${_stub_source} COMMAND ${_command})
   add_executable(${_stub_target} EXCLUDE_FROM_ALL ${_stub_source})
-  target_compile_options(${_stub_target} PUBLIC "-include${_pch}")
 endfunction()
 
 function(add_precompiled_header _pch)
@@ -89,9 +88,6 @@ function(use_precompiled_header _target _pch)
   _pch_get_stub_basename(_pch_basename ${_pch})
   add_dependencies(${_target} ${_pch_target})
 
-  target_compile_options(${_target} 
-    PUBLIC "-include${_pch}"
-    )
   _pch_get_directory(_pch_directory ${_pch})
   target_include_directories(${_target} BEFORE
     PUBLIC ${_pch_directory})
