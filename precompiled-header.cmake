@@ -31,6 +31,7 @@ endfunction()
 
 function(_pch_get_full_header_path _result _header)
   get_property(_includes DIRECTORY PROPERTY INCLUDE_DIRECTORIES)
+  unset(_header_path CACHE)
   find_path(_header_path ${_header} ${_includes})
   set(${_result} ${_header_path}/${_header} PARENT_SCOPE)
 endfunction()
